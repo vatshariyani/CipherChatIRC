@@ -3,6 +3,7 @@ import java.io.BufferedWriter;
 import java.io.InputStreamReader;
 import java.io.OutputStreamWriter;
 import java.net.Socket;
+import java.awt.Toolkit;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -31,7 +32,8 @@ public class IRCClient {
             writer.write("USER " + nickname + " 0 * :" + nickname + "\r\n");
             writer.flush();
 
-            new Thread(() -> {
+            // Notification handling function
+            Runnable handleNotification = () -> {
                 try {
                     String line;
                     while ((line = reader.readLine()) != null) {
@@ -47,6 +49,9 @@ public class IRCClient {
                             String sender = line.split("!")[0].substring(1);
                             String message = line.split("PRIVMSG " + channel + " :")[1];
                             System.out.println(sender + ": " + message);
+                        } // Check if the message is a notification
+                        if (line.startsWith("@notification")) {
+                            handleNotification(line.substring("@notification".length()).trim());
                         } else if (line.contains("VERSION")) {
                             String sender = line.split("!")[0].substring(1);
                             String reply = "NOTICE " + sender + " :☺VERSION IRCClient v1.0☺\r\n";
@@ -61,7 +66,8 @@ public class IRCClient {
                 } catch (Exception e) {
                     e.printStackTrace();
                 }
-            }).start();
+            };
+            new Thread(handleNotification).start();
 
             new Thread(() -> {
                 try {
@@ -150,7 +156,7 @@ public class IRCClient {
                                 } catch (Exception e) {
                                     e.printStackTrace();
                                 }
-                            // Update the main loop to handle the command for displaying channel topics
+                                // Update the main loop to handle the command for displaying channel topics
                             } else if (input.equalsIgnoreCase("/topic")) {
                                 try {
                                     displayChannelTopic(writer);
@@ -207,6 +213,13 @@ public class IRCClient {
     private void displayChannelTopic(BufferedWriter writer) throws Exception {
         writer.write("TOPIC " + channel + "\r\n");
         writer.flush();
+    }
+
+    // Method to handle notifications
+    private void handleNotification(String notification) {
+        System.out.println("Notification: " + notification);
+        // Play a notification sound
+        Toolkit.getDefaultToolkit().beep();
     }
 
     private void listUsers(BufferedWriter writer) throws Exception {
