@@ -1,0 +1,2 @@
+# CipherChatIRC
+IRC with Encryption.
