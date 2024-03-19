@@ -44,9 +44,18 @@ public class IRCClient {
                             writer.write("PONG" + line.substring(4) + "\r\n");
                             writer.flush();
                         } else if (line.contains("PRIVMSG " + channel)) {
-                            handlePrivateMessage(line);
+                            String sender = line.split("!")[0].substring(1);
+                            String message = line.split("PRIVMSG " + channel + " :")[1];
+                            System.out.println(sender + ": " + message);
                         } else if (line.contains("VERSION")) {
-                            handleVersionRequest(line, writer);
+                            String sender = line.split("!")[0].substring(1);
+                            String reply = "NOTICE " + sender + " :☺VERSION IRCClient v1.0☺\r\n";
+                            try {
+                                writer.write(reply);
+                                writer.flush();
+                            } catch (Exception e) {
+                                e.printStackTrace();
+                            }
                         }
                     }
                 } catch (Exception e) {
@@ -59,7 +68,111 @@ public class IRCClient {
                     BufferedReader consoleReader = new BufferedReader(new InputStreamReader(System.in));
                     String input;
                     while ((input = consoleReader.readLine()) != null) {
-                        handleUserInput(input, writer, socket, consoleReader);
+                        if (!connected) {
+                            System.out.println("Not connected to IRC server. Cannot send message.");
+                            continue;
+                        }
+                        if (input.equalsIgnoreCase("/quit")) {
+                            try {
+                                writer.write("QUIT\r\n");
+                                writer.flush();
+                                socket.close();
+                            } catch (Exception e) {
+                                e.printStackTrace();
+                            }
+                            break;
+                        } else if (input.startsWith("/join")) {
+                            String[] parts = input.split(" ");
+                            if (parts.length == 2) {
+                                channel = parts[1];
+                                try {
+                                    writer.write("JOIN " + channel + "\r\n");
+                                    writer.flush();
+                                    System.out.println("Joined channel: " + channel);
+                                } catch (Exception e) {
+                                    e.printStackTrace();
+                                }
+                            } else {
+                                System.out.println("Invalid command. Usage: /join <channel>");
+                            }
+                        } else if (input.equalsIgnoreCase("/part")) {
+                            try {
+                                writer.write("PART " + channel + "\r\n");
+                                writer.flush();
+                                System.out.println("Left channel: " + channel);
+                            } catch (Exception e) {
+                                e.printStackTrace();
+                            }
+                        } else if (input.equalsIgnoreCase("/list")) {
+                            List<String> channels = null;
+                            try {
+                                channels = listChannels(socket, writer);
+                                System.out.println("Available channels:");
+                                for (String channel : channels) {
+                                    System.out.println(channel);
+                                }
+                                listedChannels = true; // Set the flag
+                            } catch (Exception e) {
+                                e.printStackTrace();
+                            }
+                            continue; // Skip the rest of the loop and wait for next input
+                        } else if (input.equalsIgnoreCase("/help")) {
+                            try {
+                                displayHelp();
+                            } catch (Exception e) {
+                                e.printStackTrace();
+                            }
+                        } else if (input.equalsIgnoreCase("/msg")) {
+                            try {
+                                System.out.print("Enter recipient's nickname: ");
+                                String recipient = consoleReader.readLine();
+                                System.out.print("Enter message: ");
+                                String message = consoleReader.readLine();
+                                writer.write("PRIVMSG " + recipient + " :" + message + "\r\n");
+                                writer.flush();
+                                System.out.println("you: " + message); // Display message sent by user
+                            } catch (Exception e) {
+                                e.printStackTrace();
+                            }
+                        } else if (input.equalsIgnoreCase("/listusers")) {
+                            try {
+                                listUsers(writer);
+                            } catch (Exception e) {
+                                e.printStackTrace();
+                            }
+                        } else {
+                            if (!input.startsWith("/")) {
+                                // Assuming input is a message to be sent to the current channel
+                                try {
+                                    writer.write("PRIVMSG " + channel + " :" + input + "\r\n");
+                                    writer.flush();
+                                    System.out.println("you: " + input); // Display message sent by user
+                                } catch (Exception e) {
+                                    e.printStackTrace();
+                                }
+                            // Update the main loop to handle the command for displaying channel topics
+                            } else if (input.equalsIgnoreCase("/topic")) {
+                                try {
+                                    displayChannelTopic(writer);
+                                } catch (Exception e) {
+                                    e.printStackTrace();
+                                }
+                            } else {
+                                // Handle other commands
+                                try {
+                                    writer.write(input + "\r\n"); // Send the command directly
+                                    writer.flush();
+                                } catch (Exception e) {
+                                    e.printStackTrace();
+                                }
+                            }
+                        }
+                        // Flush the writer after each input
+                        try {
+                            writer.flush();
+                        } catch (Exception e) {
+                            e.printStackTrace();
+                        }
                     }
                 } catch (Exception e) {
                     e.printStackTrace();
@@ -69,114 +182,6 @@ public class IRCClient {
         } catch (Exception e) {
             e.printStackTrace();
         }
-    }
-
-    private void handleUserInput(String input, BufferedWriter writer, Socket socket, BufferedReader consoleReader) {
-        try {
-            if (!connected) {
-                System.out.println("Not connected to IRC server. Cannot send message.");
-                return;
-            }
-            if (input.equalsIgnoreCase("/quit")) {
-                writer.write("QUIT\r\n");
-                writer.flush();
-                socket.close();
-                return;
-            }
-            if (input.startsWith("/join")) {
-                handleJoinCommand(input, writer);
-                return;
-            }
-            if (input.equalsIgnoreCase("/part")) {
-                handlePartCommand(writer);
-                return;
-            }
-            if (input.equalsIgnoreCase("/list")) {
-                handleListCommand(writer, socket);
-                return;
-            }
-            if (input.equalsIgnoreCase("/listusers")) {
-                handleListUsersCommand(writer);
-                return;
-            }
-            if (input.equalsIgnoreCase("/msg")) {
-                handlePrivateMessageInput(writer, consoleReader);
-                return;
-            }
-            if (!input.startsWith("/")) {
-                handleRegularMessage(input, writer);
-                return;
-            }
-            handleOtherCommands(input, writer);
-        } catch (Exception e) {
-            e.printStackTrace();
-        }
-    }
-
-    private void handleJoinCommand(String input, BufferedWriter writer) throws Exception {
-        String[] parts = input.split(" ");
-        if (parts.length == 2) {
-            channel = parts[1];
-            writer.write("JOIN " + channel + "\r\n");
-            writer.flush();
-            System.out.println("Joined channel: " + channel);
-        } else {
-            System.out.println("Invalid command. Usage: /join <channel>");
-        }
-    }
-
-    private void handlePartCommand(BufferedWriter writer) throws Exception {
-        writer.write("PART " + channel + "\r\n");
-        writer.flush();
-        System.out.println("Left channel: " + channel);
-    }
-
-    private void handleListCommand(BufferedWriter writer, Socket socket) throws Exception {
-        List<String> channels = listChannels(socket, writer);
-        System.out.println("Available channels:");
-        for (String channel : channels) {
-            System.out.println(channel);
-        }
-        listedChannels = true; // Set the flag
-    }
-
-    private void handleListUsersCommand(BufferedWriter writer) throws Exception {
-        writer.write("NAMES " + channel + "\r\n");
-        writer.flush();
-    }
-
-    private void handlePrivateMessageInput(BufferedWriter writer, BufferedReader consoleReader) throws Exception {
-        System.out.print("Enter recipient's nickname: ");
-        String recipient = consoleReader.readLine();
-        System.out.print("Enter message: ");
-        String message = consoleReader.readLine();
-        writer.write("PRIVMSG " + recipient + " :" + message + "\r\n");
-        writer.flush();
-        System.out.println("you: " + message); // Display message sent by user
-    }
-
-    private void handleRegularMessage(String input, BufferedWriter writer) throws Exception {
-        writer.write("PRIVMSG " + channel + " :" + input + "\r\n");
-        writer.flush();
-        System.out.println("you: " + input); // Display message sent by user
-    }
-
-    private void handleOtherCommands(String input, BufferedWriter writer) throws Exception {
-        writer.write(input + "\r\n"); // Send the command directly
-        writer.flush();
-    }
-
-    private void handlePrivateMessage(String line) {
-        String sender = line.split("!")[0].substring(1);
-        String message = line.split("PRIVMSG " + channel + " :")[1];
-        System.out.println(sender + ": " + message);
-    }
-
-    private void handleVersionRequest(String line, BufferedWriter writer) throws Exception {
-        String sender = line.split("!")[0].substring(1);
-        String reply = "NOTICE " + sender + " :☺VERSION IRCClient v1.0☺\r\n";
-        writer.write(reply);
-        writer.flush();
     }
 
     private List<String> listChannels(Socket socket, BufferedWriter writer) throws Exception {
@@ -198,6 +203,17 @@ public class IRCClient {
         return channels;
     }
 
+    // Method to request and display the channel topic
+    private void displayChannelTopic(BufferedWriter writer) throws Exception {
+        writer.write("TOPIC " + channel + "\r\n");
+        writer.flush();
+    }
+
+    private void listUsers(BufferedWriter writer) throws Exception {
+        writer.write("NAMES " + channel + "\r\n");
+        writer.flush();
+    }
+
     private void displayHelp() {
         System.out.println("Available Commands:");
         System.out.println("/join <channel> - Join a channel");
@@ -206,6 +222,7 @@ public class IRCClient {
         System.out.println("/list - List available channels");
         System.out.println("/listusers - List users in the channel");
         System.out.println("/msg - Send a private message to a user");
+        System.out.println("/topic - Display channel topics");
         System.out.println("/help - Display this help message");
     }
 
@@ -225,4 +242,3 @@ public class IRCClient {
         }
     }
 }
-
