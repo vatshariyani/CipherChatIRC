@@ -128,21 +128,55 @@ public class IRCClient {
                             } catch (Exception e) {
                                 e.printStackTrace();
                             }
-                        } else if (input.equalsIgnoreCase("/msg")) {
+                        } else if (input.startsWith("/msg ")) {
                             try {
-                                System.out.print("Enter recipient's nickname: ");
-                                String recipient = consoleReader.readLine();
-                                System.out.print("Enter message: ");
-                                String message = consoleReader.readLine();
-                                writer.write("PRIVMSG " + recipient + " :" + message + "\r\n");
-                                writer.flush();
-                                System.out.println("you: " + message); // Display message sent by user
+                                String[] parts = input.split(" ", 3);
+                                if (parts.length == 3) {
+                                    String recipient = parts[1];
+                                    String message = parts[2];
+                                    writer.write("PRIVMSG " + recipient + " :" + message + "\r\n");
+                                    writer.flush();
+                                    System.out.println("you: " + message); // Display message sent by user
+                                } else {
+                                    System.out.println("Invalid command. Usage: /msg <nickname> <message>");
+                                }
                             } catch (Exception e) {
                                 e.printStackTrace();
                             }
                         } else if (input.equalsIgnoreCase("/listusers")) {
                             try {
                                 listUsers(writer);
+                            } catch (Exception e) {
+                                e.printStackTrace();
+                            }
+                        } else if (input.startsWith("/nick")) {
+                            String[] parts = input.split(" ");
+                            if (parts.length == 2) {
+                                String newNickname = parts[1];
+                                try {
+                                    writer.write("NICK " + newNickname + "\r\n");
+                                    writer.flush();
+                                    System.out.println("Changed nickname to: " + newNickname);
+                                    nickname = newNickname; // Update the nickname
+                                } catch (Exception e) {
+                                    e.printStackTrace();
+                                }
+                            } else {
+                                System.out.println("Invalid command. Usage: /nick <new_nickname>");
+                            }
+                        } else if (input.startsWith("/msg NickServ REGISTER ")) {
+                            try {
+                                String[] parts = input.split(" ", 4);
+                                if (parts.length == 4) {
+                                    String password = parts[3];
+                                    String email = parts[4];
+                                    String message = "REGISTER " + password + " " + email;
+                                    writer.write("PRIVMSG NickServ :" + message + "\r\n");
+                                    writer.flush();
+                                    System.out.println("Sent registration request to NickServ.");
+                                } else {
+                                    System.out.println("Invalid command. Usage: /msg NickServ REGISTER <password> <email>");
+                                }
                             } catch (Exception e) {
                                 e.printStackTrace();
                             }
@@ -234,7 +268,8 @@ public class IRCClient {
         System.out.println("/quit - Disconnect from the server");
         System.out.println("/list - List available channels");
         System.out.println("/listusers - List users in the channel");
-        System.out.println("/msg - Send a private message to a user");
+        System.out.println("/msg <nickname> <message> - Send a private message to a user");
+        System.out.println("/nick <new_nickname> - Change your nickname");
         System.out.println("/topic - Display channel topics");
         System.out.println("/help - Display this help message");
     }
