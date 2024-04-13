@@ -1,11 +1,12 @@
-import java.io.BufferedReader;
-import java.io.BufferedWriter;
-import java.io.InputStreamReader;
-import java.io.OutputStreamWriter;
+import javax.crypto.*;
+import javax.crypto.spec.*;
+import java.io.*;
 import java.net.Socket;
+import java.nio.charset.StandardCharsets;
+import java.security.*;
+import java.util.*;
+import java.util.Base64;
 import java.awt.Toolkit;
-import java.util.ArrayList;
-import java.util.List;
 
 public class IRCClient {
     private String nickname;
@@ -14,6 +15,10 @@ public class IRCClient {
     private String channel;
     private boolean connected = false;
     private boolean listedChannels = false; // Flag to indicate if channels are listed
+
+    private KeyPair keyPair;
+    private SecretKey secretKey;
+    private Map<String, PublicKey> publicKeys = new HashMap<>();
 
     public IRCClient(String nickname, String server, int port) {
         this.nickname = nickname;
@@ -24,6 +29,13 @@ public class IRCClient {
 
     public void connect() {
         try {
+            KeyPairGenerator keyPairGenerator = KeyPairGenerator.getInstance("RSA");
+            keyPairGenerator.initialize(2048);
+            keyPair = keyPairGenerator.generateKeyPair();
+            secretKey = generateRandomSecretKey();
+            System.out.println("Secret Key: " + secretKey);
+            System.out.println("Session Key Generated: " + Base64.getEncoder().encodeToString(secretKey.getEncoded()));
+
             Socket socket = new Socket(server, port);
             BufferedWriter writer = new BufferedWriter(new OutputStreamWriter(socket.getOutputStream()));
             BufferedReader reader = new BufferedReader(new InputStreamReader(socket.getInputStream()));
@@ -50,6 +62,11 @@ public class IRCClient {
                             String message = line.split("PRIVMSG " + channel + " :")[1];
                             System.out.println(sender + ": " + message);
                         } // Check if the message is a notification
+                        else if (line.contains("JOIN " + channel) && !line.contains(nickname)) {
+                            String user = line.split("!")[0].substring(1);
+                            System.out.println(user + " joined " + channel);
+                            handleUserJoin(user, writer);
+                        }
                         if (line.startsWith("@notification")) {
                             handleNotification(line.substring("@notification".length()).trim());
                         } else if (line.contains("VERSION")) {
@@ -95,6 +112,7 @@ public class IRCClient {
                                     writer.write("JOIN " + channel + "\r\n");
                                     writer.flush();
                                     System.out.println("Joined channel: " + channel);
+                                    broadcastEncryptedSessionKey(encryptSessionKeys(secretKey, publicKeys), writer);
                                 } catch (Exception e) {
                                     e.printStackTrace();
                                 }
@@ -184,12 +202,24 @@ public class IRCClient {
                             if (!input.startsWith("/")) {
                                 // Assuming input is a message to be sent to the current channel
                                 try {
-                                    writer.write("PRIVMSG " + channel + " :" + input + "\r\n");
+                                    // Encrypt the message using the session key
+                                    String encryptedMessage = encryptMessage(input, secretKey);
+                                    System.out.println("Original Message: " + input);
+                                    System.out.println("Encrypted Message: " + encryptedMessage);
+                                    writer.write("PRIVMSG " + channel + " :" + encryptedMessage + "\r\n");
                                     writer.flush();
                                     System.out.println("you: " + input); // Display message sent by user
                                 } catch (Exception e) {
                                     e.printStackTrace();
                                 }
+                            } else if (input.startsWith("PRIVMSG " + channel)){
+                                // Decrypt incoming message
+                                String line = reader.readLine();
+                                String sender = line.split("!")[0].substring(1);
+                                String encryptedMessage = line.split("PRIVMSG " + channel + " :")[1];
+                                String decryptedMessage = decryptMessage(encryptedMessage, secretKey);
+                                System.out.println(sender + ": " + decryptedMessage);
+                            
                                 // Update the main loop to handle the command for displaying channel topics
                             } else if (input.equalsIgnoreCase("/topic")) {
                                 try {
@@ -219,9 +249,82 @@ public class IRCClient {
                 }
             }).start();
 
+            // Step 3: Broadcast Encrypted Session Key
+            broadcastEncryptedSessionKey(encryptSessionKeys(secretKey, publicKeys), writer);
+
         } catch (Exception e) {
             e.printStackTrace();
         }
+    }
+
+    private void handleUserJoin(String user, BufferedWriter writer) {
+        try {
+            // Broadcast the encrypted session key to the new user
+            String encodedKey = Base64.getEncoder().encodeToString(secretKey.getEncoded());
+            writer.write("PRIVMSG " + user + " :" + "@keyexchange " + encodedKey + "\r\n");
+            writer.flush();
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+    }
+
+    // Step 2: Encrypt Session Key for Each User
+    private Map<String, byte[]> encryptSessionKeys(SecretKey sessionKey, Map<String, PublicKey> publicKeys) throws NoSuchAlgorithmException, NoSuchPaddingException, InvalidKeyException, IllegalBlockSizeException, BadPaddingException {
+        Map<String, byte[]> encryptedSessionKeys = new HashMap<>();
+        Cipher cipher = Cipher.getInstance("RSA");
+        for (Map.Entry<String, PublicKey> entry : publicKeys.entrySet()) {
+            cipher.init(Cipher.ENCRYPT_MODE, entry.getValue());
+            byte[] encryptedKey = cipher.doFinal(sessionKey.getEncoded());
+            encryptedSessionKeys.put(entry.getKey(), encryptedKey);
+        }
+        return encryptedSessionKeys;
+    }
+
+    // Step 3: Broadcast Encrypted Session Key
+    private void broadcastEncryptedSessionKey(Map<String, byte[]> encryptedSessionKeys, BufferedWriter writer) {
+        try {
+            for (Map.Entry<String, byte[]> entry : encryptedSessionKeys.entrySet()) {
+                String recipient = entry.getKey();
+                byte[] encryptedKey = entry.getValue();
+                String encodedKey = Base64.getEncoder().encodeToString(encryptedKey);
+                writer.write("PRIVMSG " + recipient + " :" + "@keyexchange " + encodedKey + "\r\n");
+                writer.flush();
+
+                // Notify about the key exchange
+                System.out.println("Key exchanged with " + recipient);
+            }
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+    }
+
+    // Step 4: Decrypt Session Key
+    private SecretKey decryptSessionKey(byte[] encryptedSessionKey) throws NoSuchAlgorithmException, NoSuchPaddingException, InvalidKeyException, IllegalBlockSizeException, BadPaddingException {
+        Cipher cipher = Cipher.getInstance("RSA");
+        cipher.init(Cipher.DECRYPT_MODE, keyPair.getPrivate());
+        byte[] decryptedKey = cipher.doFinal(encryptedSessionKey);
+        return new SecretKeySpec(decryptedKey, 0, decryptedKey.length, "AES");
+    }
+
+    // Step 5: Secure Communication
+    private String encryptMessage(String message, SecretKey sessionKey) throws NoSuchAlgorithmException, NoSuchPaddingException, InvalidKeyException, IllegalBlockSizeException, BadPaddingException {
+        Cipher cipher = Cipher.getInstance("AES");
+        cipher.init(Cipher.ENCRYPT_MODE, sessionKey);
+        byte[] encryptedBytes = cipher.doFinal(message.getBytes(StandardCharsets.UTF_8));
+        return Base64.getEncoder().encodeToString(encryptedBytes);
+    }
+
+    private String decryptMessage(String encryptedMessage, SecretKey sessionKey) throws NoSuchAlgorithmException, NoSuchPaddingException, InvalidKeyException, IllegalBlockSizeException, BadPaddingException {
+        Cipher cipher = Cipher.getInstance("AES");
+        cipher.init(Cipher.DECRYPT_MODE, sessionKey);
+        byte[] decryptedBytes = cipher.doFinal(Base64.getDecoder().decode(encryptedMessage));
+        return new String(decryptedBytes, StandardCharsets.UTF_8);
+    }
+
+    private SecretKey generateRandomSecretKey() throws NoSuchAlgorithmException {
+        KeyGenerator keyGen = KeyGenerator.getInstance("AES");
+        keyGen.init(128);
+        return keyGen.generateKey();
     }
 
     private List<String> listChannels(Socket socket, BufferedWriter writer) throws Exception {
