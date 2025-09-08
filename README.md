@@ -396,9 +396,9 @@ The research paper is licensed under CC BY 4.0 - see the [Research Square page](
 If you use this project in your research, please cite:
 
 ```bibtex
-@article{thigale2024securing,
+@article{vatshariyani,
   title={Securing Conversations: The Role of Encryption in IRC Communication},
-  author={Thigale, Mihika and Rana, Apoorv and Hariyani, Vats},
+  author={Vats Hariyani, Apoorv Rana and Mihika Thigale},
   journal={Research Square},
   year={2024},
   doi={10.21203/rs.3.rs-5487788/v1},
